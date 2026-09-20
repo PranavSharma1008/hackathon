@@ -24,6 +24,8 @@ export class StoreModel {
       moisture_percentage: row.moisture_percentage ?? 11.5,
       local_names: row.local_names || '',
       soil_type: row.soil_type || 'Loamy',
+      report_document: row.report_document || null,
+      report_file_name: row.report_file_name || null,
       tags: row.local_names ? row.local_names.split(',').map(s => s.trim()).filter(Boolean) : [],
       status: row.status, // 'available', 'reserved', 'sold'
       notes: row.notes || null,
@@ -40,8 +42,9 @@ export class StoreModel {
     const stmt = db.prepare(`
       INSERT INTO farmer_store_items (
         id, farmer_id, crop_name, grade, quantity_quintals, price_per_quintal,
-        storage_type, harvest_date, moisture_percentage, local_names, soil_type, status, notes, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        storage_type, harvest_date, moisture_percentage, local_names, soil_type,
+        report_document, report_file_name, status, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -56,6 +59,8 @@ export class StoreModel {
       Number(data.moisture_percentage || 11.5),
       data.local_names || '',
       data.soil_type || 'Loamy',
+      data.report_document || null,
+      data.report_file_name || null,
       data.status || 'available',
       data.notes || null,
       now,
@@ -184,6 +189,14 @@ export class StoreModel {
     if (updates.soil_type !== undefined) {
       fields.push('soil_type = ?');
       values.push(updates.soil_type);
+    }
+    if (updates.report_document !== undefined) {
+      fields.push('report_document = ?');
+      values.push(updates.report_document);
+    }
+    if (updates.report_file_name !== undefined) {
+      fields.push('report_file_name = ?');
+      values.push(updates.report_file_name);
     }
     if (updates.storage_type !== undefined) {
       fields.push('storage_type = ?');

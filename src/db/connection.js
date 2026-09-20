@@ -41,8 +41,22 @@ export function getDb(customPath = null) {
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN served_by TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN cancelled_by TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN cancel_reason TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_payment_status TEXT DEFAULT "pending";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_paid_percentage REAL DEFAULT 0.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_paid_amount REAL DEFAULT 0.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN payment_transaction_id TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_latitude REAL;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_longitude REAL;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_checkpoint TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN driver_name TEXT DEFAULT "Jagtar Singh";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN driver_phone TEXT DEFAULT "+91-98140-11223";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN vehicle_number TEXT DEFAULT "PB-10-AZ-9981";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN speed_kmh REAL DEFAULT 48.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN eta_minutes INTEGER DEFAULT 45;'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN local_names TEXT DEFAULT "";'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN soil_type TEXT DEFAULT "Loamy";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN report_document TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN report_file_name TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmers ADD COLUMN land_parcels TEXT DEFAULT "[]";'); } catch {}
 
   // Initialize schema
@@ -62,8 +76,22 @@ export function getDb(customPath = null) {
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN served_by TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN cancelled_by TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN cancel_reason TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_payment_status TEXT DEFAULT "pending";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_paid_percentage REAL DEFAULT 0.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN advance_paid_amount REAL DEFAULT 0.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE contracts ADD COLUMN payment_transaction_id TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_latitude REAL;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_longitude REAL;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN current_checkpoint TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN driver_name TEXT DEFAULT "Jagtar Singh";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN driver_phone TEXT DEFAULT "+91-98140-11223";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN vehicle_number TEXT DEFAULT "PB-10-AZ-9981";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN speed_kmh REAL DEFAULT 48.0;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE deliveries ADD COLUMN eta_minutes INTEGER DEFAULT 45;'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN local_names TEXT DEFAULT "";'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN soil_type TEXT DEFAULT "Loamy";'); } catch {}
+  try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN report_document TEXT;'); } catch {}
+  try { dbInstance.exec('ALTER TABLE farmer_store_items ADD COLUMN report_file_name TEXT;'); } catch {}
   try { dbInstance.exec('ALTER TABLE farmers ADD COLUMN land_parcels TEXT DEFAULT "[]";'); } catch {}
 
   return dbInstance;

@@ -33,11 +33,20 @@ import {
   Check,
   Sparkles,
   Search,
-  X
+  X,
+  UploadCloud,
+  FileCheck,
+  Eye,
+  Download,
+  Navigation
 } from 'lucide-react';
 import { api } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { getAiSuggestedLocalNames, matchProduceWithAi } from '../utils/aiCropSynonyms';
+import ReportViewerModal from '../components/ReportViewerModal';
+import DispatchTrackingModal from '../components/DispatchTrackingModal';
+import EscrowBillModal from '../components/EscrowBillModal';
+import { generateCertifiedAssayPdf } from '../utils/reportUtils';
 
 export const STANDARD_CROPS = [
   'Yellow Corn / Maize',
@@ -155,6 +164,7 @@ export default function FarmerDashboard() {
     logout,
     isAuthenticated,
     isFarmer,
+    isAdmin,
     updateFarmerProfile,
     isServiceActive,
     toggleServiceStatus
@@ -167,6 +177,7 @@ export default function FarmerDashboard() {
   const [activeTab, setActiveTab] = useState(
     tabParam && ['store', 'contracts', 'deliveries'].includes(tabParam) ? tabParam : 'store'
   ); // 'store', 'contracts', 'deliveries'
+  const [previewMode, setPreviewMode] = useState(false);
 
   // Sync tab with URL search parameter (?tab=...)
   useEffect(() => {
@@ -210,6 +221,9 @@ export default function FarmerDashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [isCustomCrop, setIsCustomCrop] = useState(false);
   const [isCustomSoil, setIsCustomSoil] = useState(false);
+  const [selectedReportItem, setSelectedReportItem] = useState(null);
+  const [dispatchModalData, setDispatchModalData] = useState(null);
+  const [viewingBillContract, setViewingBillContract] = useState(null);
   const [newProduce, setNewProduce] = useState({
     crop_name: 'Yellow Corn / Maize',
     grade: 'Grade A',
@@ -220,6 +234,8 @@ export default function FarmerDashboard() {
     moisture_percentage: 11.2,
     soil_type: 'Loamy',
     local_names: 'makka, makki, yellow makka, yellow makki, bhutta',
+    report_document: '',
+    report_file_name: '',
     notes: 'Premium harvest, stored in clean hermetic condition.'
   });
 
@@ -236,6 +252,8 @@ export default function FarmerDashboard() {
   const [editStorageType, setEditStorageType] = useState('Farm Silo');
   const [editMoisture, setEditMoisture] = useState(11.2);
   const [editHarvestDate, setEditHarvestDate] = useState('');
+  const [editReportDocument, setEditReportDocument] = useState('');
+  const [editReportFileName, setEditReportFileName] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [farmerStoreSearch, setFarmerStoreSearch] = useState('');
@@ -251,10 +269,10 @@ export default function FarmerDashboard() {
   });
 
   useEffect(() => {
-    if (isAuthenticated && isFarmer) {
+    if ((isAuthenticated && (isFarmer || isAdmin)) || previewMode) {
       loadMyFarmData();
     }
-  }, [isAuthenticated, isFarmer, user]);
+  }, [isAuthenticated, isFarmer, isAdmin, previewMode, user]);
 
   async function loadMyFarmData() {
     setLoadingData(true);
@@ -276,6 +294,10 @@ export default function FarmerDashboard() {
       }
       if (!myFarmer && user?.farmer_profile) {
         myFarmer = user.farmer_profile;
+      }
+      // If admin, preview mode, or no specific farmer profile matched, pick first available farmer so dashboard loads seamlessly
+      if (!myFarmer && allFarmers.length > 0) {
+        myFarmer = allFarmers[0];
       }
 
       if (myFarmer) {
@@ -323,15 +345,50 @@ export default function FarmerDashboard() {
     }
   }
 
+  function handleReportFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setNewProduce((prev) => ({
+        ...prev,
+        report_document: reader.result,
+        report_file_name: file.name
+      }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleEditReportFileUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setEditReportDocument(reader.result);
+      setEditReportFileName(file.name);
+    };
+    reader.readAsDataURL(file);
+  }
+
   async function handleAddStoreItem(e) {
-    e.preventDefault();
-    if (!farmer?.id) return;
+    if (e) e.preventDefault();
+    const targetFarmerId = farmer?.id || user?.farmer_id || (user?.role === 'farmer' ? `farm_${user.id?.replace('user_', '')}` : null);
+    if (!targetFarmerId) {
+      setError('Farmer profile could not be resolved. Please reload page or re-login.');
+      return;
+    }
+
+    if (!newProduce.report_document) {
+      setError('⚠️ Mandatory: A Soil & Crop Quality Assay Report (PDF or document file) is required to list this commodity. Please upload a file or click "Auto-Generate Certified Lab Assay PDF".');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
     setSuccessMsg(null);
 
     try {
-      const res = await fetch(`/api/farmers/${farmer.id}/store`, {
+      const res = await fetch(`/api/farmers/${targetFarmerId}/store`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProduce)
@@ -344,7 +401,9 @@ export default function FarmerDashboard() {
 
       setSuccessMsg(data.message || 'Produce added to store inventory successfully!');
       setShowAddModal(false);
-      loadFarmerStore(farmer.id);
+      setFarmerStoreSearch(''); // Clear search so newly added product is never filtered out
+      await loadFarmerStore(targetFarmerId);
+      await loadMyFarmData();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -371,6 +430,16 @@ export default function FarmerDashboard() {
     setIsCustomCrop(false);
     setIsCustomSoil(false);
     const defaultCrop = STANDARD_CROPS[0];
+    const defaultSoil = farmer?.soil_type || 'Loamy';
+    const samplePdf = generateCertifiedAssayPdf({
+      farmerName: farmer?.name || 'Registered Agronomist',
+      cropName: defaultCrop,
+      soilType: defaultSoil,
+      grade: 'Grade A',
+      quantityQuintals: 200,
+      pricePerQuintal: 2450
+    });
+
     setNewProduce({
       crop_name: defaultCrop,
       grade: 'Grade A',
@@ -379,8 +448,10 @@ export default function FarmerDashboard() {
       storage_type: 'Farm Silo',
       harvest_date: new Date().toISOString().split('T')[0],
       moisture_percentage: 11.2,
-      soil_type: farmer?.soil_type || 'Loamy',
+      soil_type: defaultSoil,
       local_names: getAiSuggestedLocalNames(defaultCrop),
+      report_document: samplePdf,
+      report_file_name: 'APMC_Certified_Assay_Report.pdf',
       notes: 'Premium harvest, stored in clean hermetic condition.'
     });
     setShowAddModal(true);
@@ -401,6 +472,8 @@ export default function FarmerDashboard() {
     setEditStorageType(item.storage_type || 'Farm Silo');
     setEditMoisture(item.moisture_percentage ?? 11.2);
     setEditHarvestDate(item.harvest_date || '');
+    setEditReportDocument(item.report_document || '');
+    setEditReportFileName(item.report_file_name || '');
     setEditNotes(item.notes || '');
   }
 
@@ -424,6 +497,8 @@ export default function FarmerDashboard() {
           moisture_percentage: Number(editMoisture),
           harvest_date: editHarvestDate,
           soil_type: editSoilType || 'Loamy',
+          report_document: editReportDocument,
+          report_file_name: editReportFileName,
           notes: editNotes
         })
       });
@@ -540,19 +615,71 @@ export default function FarmerDashboard() {
   }
 
   // -------------------------------------------------------------
-  // UNAUTHENTICATED OR NON-FARMER GATE (HIGH SECURITY PRODUCT VIEW)
+  // UNAUTHENTICATED OR NON-FARMER GATE (WITH 1-CLICK DEMO LOGINS & PREVIEW)
   // -------------------------------------------------------------
-  if (!isAuthenticated || !isFarmer) {
+  if ((!isAuthenticated || (!isFarmer && !isAdmin)) && !previewMode) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-12 space-y-8">
         <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 rounded-3xl p-8 text-white shadow-xl text-center border border-emerald-800">
           <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto mb-4 border border-emerald-500/30">
-            <Lock className="w-8 h-8" />
+            <Tractor className="w-8 h-8" />
           </div>
           <h1 className="text-3xl font-extrabold tracking-tight">Farmer Operations Gateway</h1>
           <p className="text-slate-300 text-sm mt-2 max-w-md mx-auto leading-relaxed">
-            Strict role isolation enabled. You must be authenticated with a verified farmer account to access private soil records, commodity stores, and forward contracts.
+            Manage your produce store inventory, set ₹/Quintal selling prices, monitor soil metrics, and track forward buyback contracts.
           </p>
+
+          {/* Instant 1-Click Demo Logins */}
+          <div className="mt-6 pt-6 border-t border-emerald-800/60 max-w-md mx-auto">
+            <div className="text-xs font-bold text-emerald-300 uppercase tracking-wider mb-3">
+              ⚡ Instant 1-Click Demo Farmer Access:
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={async () => {
+                  setError(null);
+                  setAuthLoading(true);
+                  try {
+                    await login('kartikey@gmail.com', 'kartikey@gmail.com');
+                  } catch (err) {
+                    setError(err.message);
+                  } finally {
+                    setAuthLoading(false);
+                  }
+                }}
+                className="p-3 bg-white/10 hover:bg-white/20 border border-emerald-400/40 rounded-xl text-left transition cursor-pointer"
+              >
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Tractor className="w-3.5 h-3.5 text-emerald-400" />
+                  Kartikey Patel
+                </div>
+                <div className="text-[10px] text-emerald-200 mt-0.5">Verified Wheat Farmer</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setError(null);
+                  setAuthLoading(true);
+                  try {
+                    await login('balwinder@punjabfarm.in', 'farmer123');
+                  } catch (err) {
+                    setError(err.message);
+                  } finally {
+                    setAuthLoading(false);
+                  }
+                }}
+                className="p-3 bg-white/10 hover:bg-white/20 border border-emerald-400/40 rounded-xl text-left transition cursor-pointer"
+              >
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Tractor className="w-3.5 h-3.5 text-teal-400" />
+                  Balwinder Sandhu
+                </div>
+                <div className="text-[10px] text-teal-200 mt-0.5">Top Agronomic Match</div>
+              </button>
+            </div>
+          </div>
         </div>
 
         {error && (
@@ -563,13 +690,24 @@ export default function FarmerDashboard() {
         )}
 
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-8 space-y-6">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <h3 className="font-bold text-slate-900 text-lg">Farmer Gateway</h3>
+            <button
+              type="button"
+              onClick={() => setPreviewMode(true)}
+              className="text-xs font-bold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-1 cursor-pointer"
+            >
+              Explore Dashboard in Preview Mode &rarr;
+            </button>
+          </div>
+
           <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-xl border border-slate-200">
             <button
               onClick={() => {
                 setAuthMode('login');
                 setError(null);
               }}
-              className={`py-2 text-xs font-bold rounded-lg transition ${
+              className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
                 authMode === 'login' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
               }`}
             >
@@ -580,7 +718,7 @@ export default function FarmerDashboard() {
                 setAuthMode('register');
                 setError(null);
               }}
-              className={`py-2 text-xs font-bold rounded-lg transition ${
+              className={`py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
                 authMode === 'register' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
               }`}
             >
@@ -599,7 +737,7 @@ export default function FarmerDashboard() {
                   required
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
-                  placeholder="e.g. rajesh.patel@kisan.in"
+                  placeholder="e.g. kartikey@gmail.com"
                   className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:ring-2 focus:ring-emerald-500 font-mono"
                 />
               </div>
@@ -618,13 +756,22 @@ export default function FarmerDashboard() {
                 />
               </div>
 
-              <button
-                type="submit"
-                disabled={authLoading}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2"
-              >
-                {authLoading ? 'Verifying Account...' : 'Sign In to Farm Dashboard'}
-              </button>
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {authLoading ? 'Verifying Account...' : 'Sign In to Farm Dashboard'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewMode(true)}
+                  className="py-3 px-5 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-50 transition cursor-pointer"
+                >
+                  Browse All Tabs (Guest Mode)
+                </button>
+              </div>
             </form>
           ) : authStep === 1 ? (
             <form onSubmit={(e) => { e.preventDefault(); setAuthStep(2); }} className="space-y-4">
@@ -919,7 +1066,7 @@ export default function FarmerDashboard() {
             {farmer?.total_acreage || 0} Acres
           </div>
           <div className="text-[11px] text-slate-500 font-medium mt-1 truncate" title={farmer?.soil_types?.join(', ') || farmer?.soil_type || 'Loamy'}>
-            Soil: {farmer?.soil_types?.join(', ') || farmer?.soil_type || 'Loamy'} ({landParcels.length || 1} {(landParcels.length || 1) === 1 ? 'Plot' : 'Plots'})
+            Soil: {farmer?.soil_types?.join(', ') || farmer?.soil_type || 'Loamy'}
           </div>
         </div>
 
@@ -1132,6 +1279,27 @@ export default function FarmerDashboard() {
                       </div>
                     </div>
 
+                    {/* Mandatory Quality & Soil Assay Report (PDF) */}
+                    {item.report_document ? (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-xl text-xs">
+                        <div className="flex items-center gap-2 text-emerald-900 font-semibold truncate">
+                          <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="truncate">{item.report_file_name || 'Assay_Report.pdf'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReportItem(item)}
+                          className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 hover:bg-emerald-100 shrink-0 cursor-pointer shadow-xs flex items-center gap-1 transition"
+                        >
+                          <Eye className="w-3 h-3 text-emerald-600" /> View PDF
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-800">
+                        <span>⚠️ Assay certificate pending</span>
+                      </div>
+                    )}
+
                     {item.notes && (
                       <p className="text-[11px] text-slate-500 italic bg-white p-2 rounded-lg border border-slate-100">
                         "{item.notes}"
@@ -1216,14 +1384,101 @@ export default function FarmerDashboard() {
                     </div>
                   )}
 
-                  {contract.status === 'Accepted' && (
-                    <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  {/* 30% Advance Escrow Status Notifications */}
+                  {contract.status === 'Accepted' && contract.advance_payment_status !== 'paid' && (
+                    <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
                       <span>
-                        <strong>Contract Accepted:</strong> Supply agreement is active. The next step of logistics and dispatch is unlocked.
+                        <strong>Awaiting 30% Advance Escrow:</strong> You accepted the procurement offer! The buyer is required to deposit ₹{Math.round((Number(contract.agreed_price) || 0) * 0.3).toLocaleString('en-IN')} (30% advance escrow) to activate freight dispatch.
                       </span>
                     </div>
                   )}
+
+                  {(contract.advance_payment_status === 'paid' || ['Signed', 'In Transit'].includes(contract.status)) && (
+                    <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          <strong>30% Advance Escrow Deposited (₹{Number(contract.advance_paid_amount || Math.round((Number(contract.agreed_price) || 0) * 0.3)).toLocaleString('en-IN')}):</strong> Logistics truck PB-10-AZ-9981 dispatched and en route.
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-200/80 text-emerald-900 shrink-0 uppercase tracking-wider">
+                        In Transit
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Settlement Bill & Reduction Ledger for Farmer */}
+                  {(() => {
+                    const grossTotal = Number(contract.agreed_price) || 0;
+                    const advanceReduction = Number(contract.advance_paid_amount) || Math.round(grossTotal * 0.3);
+                    const balanceAfterReduction = Math.max(0, grossTotal - advanceReduction);
+
+                    return (
+                      <div className="p-3.5 bg-gradient-to-br from-slate-50 to-slate-100/70 rounded-2xl border border-slate-200 space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                            <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Escrow Settlement Bill &amp; Deduction Schedule</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setViewingBillContract(contract)}
+                            className="px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>View / Print Bill &rarr;</span>
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                          {/* Before Reduction */}
+                          <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                              Gross Bill (Before Reduction)
+                            </span>
+                            <div className="font-extrabold text-slate-900 text-sm font-mono mt-0.5">
+                              ₹{grossTotal.toLocaleString('en-IN')}
+                            </div>
+                            <span className="text-[10px] text-slate-500 block">Total Contract Consideration</span>
+                          </div>
+
+                          {/* 30% Reduction / Advance */}
+                          <div className="p-2.5 bg-amber-50/80 rounded-xl border border-amber-200 shadow-2xs">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
+                                30% Advance (Reduction)
+                              </span>
+                              <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
+                                contract.advance_payment_status === 'paid' ? 'bg-emerald-600 text-white' : 'bg-amber-200 text-amber-900'
+                              }`}>
+                                {contract.advance_payment_status === 'paid' ? 'DEPOSITED' : 'PENDING'}
+                              </span>
+                            </div>
+                            <div className="font-extrabold text-amber-900 text-sm font-mono mt-0.5">
+                              - ₹{advanceReduction.toLocaleString('en-IN')}
+                            </div>
+                            <span className="text-[10px] text-amber-700 block">
+                              {contract.advance_payment_status === 'paid' ? 'Secured in Trust Escrow' : 'Buyer Deposit Awaited'}
+                            </span>
+                          </div>
+
+                          {/* After Reduction (Net Balance) */}
+                          <div className="p-2.5 bg-emerald-50/90 rounded-xl border border-emerald-300 shadow-2xs">
+                            <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                              Final Due (After Reduction)
+                            </span>
+                            <div className="font-extrabold text-emerald-900 text-sm font-mono mt-0.5">
+                              ₹{balanceAfterReduction.toLocaleString('en-IN')}
+                            </div>
+                            <span className="text-[10px] text-emerald-700 font-medium block">
+                              70% Balance on Silo Acceptance
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="space-y-1">
@@ -1252,6 +1507,16 @@ export default function FarmerDashboard() {
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* View Escrow Bill Button */}
+                      <button
+                        type="button"
+                        onClick={() => setViewingBillContract(contract)}
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs flex items-center gap-1.5 border border-slate-200 transition cursor-pointer shadow-2xs"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>View Escrow Bill</span>
+                      </button>
+
                       {contract.status === 'Pending' && (
                         <>
                           <button
@@ -1269,6 +1534,18 @@ export default function FarmerDashboard() {
                             <span>Decline</span>
                           </button>
                         </>
+                      )}
+
+                      {/* Single Dispatch Tracking Button */}
+                      {(contract.advance_payment_status === 'paid' || ['Signed', 'In Transit', 'Fulfilled'].includes(contract.status)) && (
+                        <button
+                          type="button"
+                          onClick={() => setDispatchModalData({ contract })}
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                        >
+                          <Navigation className="w-3.5 h-3.5" />
+                          <span>Track Dispatch</span>
+                        </button>
                       )}
 
                       <Link
@@ -1339,12 +1616,20 @@ export default function FarmerDashboard() {
                     </div>
                   )}
 
-                  <div className="pt-1 flex justify-end">
+                  <div className="pt-1 flex items-center justify-end gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setDispatchModalData({ delivery: del, contract: { id: del.contract_id, crop: del.crop } })}
+                      className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-lg border border-emerald-200 flex items-center gap-1 cursor-pointer transition shadow-xs"
+                    >
+                      <Navigation className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Live Dispatch Tracker &rarr;</span>
+                    </button>
                     <Link
                       to={`/contract/${del.contract_id}`}
-                      className="text-xs font-bold text-emerald-700 hover:underline inline-flex items-center gap-1"
+                      className="text-xs font-bold text-slate-600 hover:text-slate-900 hover:underline inline-flex items-center gap-1"
                     >
-                      <span>Open Logistics Tracker &rarr;</span>
+                      <span>Contract Details</span>
                     </Link>
                   </div>
                 </div>
@@ -1356,9 +1641,9 @@ export default function FarmerDashboard() {
 
       {/* Modal: Add Produce to Store */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-800 to-green-900 p-6 text-white flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in overflow-y-auto">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl max-w-lg w-full overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="bg-gradient-to-r from-emerald-800 to-green-900 p-5 text-white flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2">
                   <Store className="w-5 h-5 text-emerald-300" />
@@ -1369,14 +1654,25 @@ export default function FarmerDashboard() {
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowAddModal(false)}
-                className="text-white/80 hover:text-white text-xl font-bold p-1"
+                className="text-white/80 hover:text-white text-xl font-bold p-1 cursor-pointer transition"
               >
                 &times;
               </button>
             </div>
 
-            <form onSubmit={handleAddStoreItem} className="p-6 space-y-4">
+            <form
+              onSubmit={handleAddStoreItem}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
+                  e.preventDefault();
+                  handleAddStoreItem();
+                }
+              }}
+              className="flex flex-col flex-1 overflow-hidden"
+            >
+              <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
@@ -1649,6 +1945,141 @@ export default function FarmerDashboard() {
                 />
               </div>
 
+              {/* Mandatory Soil & Crop Quality Assay Report (PDF / Document) */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border-2 border-dashed border-emerald-300 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-emerald-600" />
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-slate-800">
+                        Soil &amp; Crop Quality Assay Report (PDF / Document)
+                      </label>
+                      <span className="text-[10px] text-slate-500">
+                        Mandatory official report of soil health, moisture, and crop purity
+                      </span>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-black bg-red-100 text-red-700 border border-red-200 uppercase tracking-wide">
+                    Mandatory *
+                  </span>
+                </div>
+
+                {newProduce.report_document ? (
+                  <div className="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                        <FileText className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="truncate">
+                        <p className="text-xs font-bold text-emerald-900 truncate">
+                          {newProduce.report_file_name || 'Assay_Report.pdf'}
+                        </p>
+                        <p className="text-[10px] text-emerald-700 font-medium">
+                          ✓ Document attached &bull; Ready for verification
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedReportItem({
+                          crop_name: newProduce.crop_name,
+                          farmer_name: farmer?.name || 'Farmer',
+                          soil_type: newProduce.soil_type,
+                          grade: newProduce.grade,
+                          report_file_name: newProduce.report_file_name,
+                          report_document: newProduce.report_document
+                        })}
+                        className="px-2.5 py-1 text-xs font-bold text-emerald-700 bg-white hover:bg-emerald-100 rounded-lg border border-emerald-300 transition cursor-pointer shadow-xs"
+                      >
+                        Preview PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNewProduce({ ...newProduce, report_document: '', report_file_name: '' })}
+                        className="p-1 text-slate-400 hover:text-red-600 transition cursor-pointer"
+                        title="Remove attached file"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <label className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-white border border-slate-300 rounded-xl hover:bg-slate-100 cursor-pointer transition text-xs font-semibold text-slate-700 shadow-xs">
+                        <UploadCloud className="w-4 h-4 text-emerald-600" />
+                        <span>Upload File (PDF / DOC / Image)</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,application/pdf"
+                          onChange={handleReportFileUpload}
+                          className="hidden"
+                          required
+                        />
+                      </label>
+
+                      <span className="text-xs text-slate-400 text-center font-bold">OR</span>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const generated = generateCertifiedAssayPdf({
+                            farmerName: farmer?.name || 'Registered Farmer',
+                            cropName: newProduce.crop_name,
+                            soilType: newProduce.soil_type || 'Loamy',
+                            grade: newProduce.grade || 'Grade A',
+                            quantityQuintals: newProduce.quantity_quintals || 100,
+                            pricePerQuintal: newProduce.price_per_quintal || 2400
+                          });
+                          setNewProduce({
+                            ...newProduce,
+                            report_document: generated,
+                            report_file_name: `${(newProduce.crop_name || 'Crop').replace(/[^a-zA-Z0-9]/g, '_')}_APMC_Lab_Assay.pdf`
+                          });
+                        }}
+                        className="px-3 py-2 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>⚡ Generate Lab Assay PDF</span>
+                      </button>
+                    </div>
+
+                    {/* Quick Downloadable Sample PDF Files */}
+                    <div className="flex flex-wrap items-center justify-center gap-2 pt-1 bg-slate-50 p-2 rounded-xl border border-slate-200">
+                      <span className="text-[11px] text-slate-500 font-medium">📥 Download sample PDFs from project:</span>
+                      <a
+                        href="/sample_wheat_quality_report.pdf"
+                        download="sample_wheat_quality_report.pdf"
+                        className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline inline-flex items-center gap-0.5"
+                      >
+                        🌾 Wheat Report.pdf
+                      </a>
+                      <span className="text-slate-300">&bull;</span>
+                      <a
+                        href="/sample_basmati_rice_inspection_report.pdf"
+                        download="sample_basmati_rice_inspection_report.pdf"
+                        className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline inline-flex items-center gap-0.5"
+                      >
+                        🍚 Rice Report.pdf
+                      </a>
+                      <span className="text-slate-300">&bull;</span>
+                      <a
+                        href="/sample_maize_assay_certificate.pdf"
+                        download="sample_maize_assay_certificate.pdf"
+                        className="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline inline-flex items-center gap-0.5"
+                      >
+                        🌽 Maize Report.pdf
+                      </a>
+                    </div>
+
+                    <p className="text-[10px] text-red-600 font-medium text-center">
+                      * You must attach a PDF or document report to list this commodity.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex justify-between items-center text-xs">
                 <span className="text-emerald-800 font-semibold">Total Lot Market Value:</span>
                 <span className="text-sm font-extrabold text-emerald-900 font-mono">
@@ -1656,20 +2087,33 @@ export default function FarmerDashboard() {
                 </span>
               </div>
 
-              <div className="flex gap-3 pt-2">
+              </div>
+
+              {/* Sticky Footer Action Bar Pinned at Bottom */}
+              <div className="shrink-0 p-4 bg-slate-50 border-t border-slate-200 flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="flex-1 py-2.5 border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-50 transition"
+                  className="flex-1 py-2.5 border border-slate-300 text-slate-700 font-semibold text-xs rounded-xl hover:bg-slate-100 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/20"
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  {submitting ? 'Saving to Database...' : 'List Commodity in Store'}
+                  {submitting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving to Store...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      <span>List Commodity in Store &rarr;</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
@@ -1963,6 +2407,86 @@ export default function FarmerDashboard() {
                 />
               </div>
 
+              {/* Soil & Crop Quality Assay Report (PDF / Document) in Edit Modal */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                    <FileCheck className="w-4 h-4 text-emerald-600" />
+                    Quality &amp; Soil Assay Report (PDF)
+                  </span>
+                  <span className="text-[10px] text-emerald-700 font-semibold">
+                    Mandatory APMC Document
+                  </span>
+                </div>
+
+                {editReportDocument ? (
+                  <div className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="text-xs font-medium text-slate-800 truncate">
+                        {editReportFileName || 'Assay_Report.pdf'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedReportItem({
+                          crop_name: editCropName,
+                          farmer_name: farmer?.name || 'Farmer',
+                          soil_type: editSoilType,
+                          grade: editGrade,
+                          report_file_name: editReportFileName,
+                          report_document: editReportDocument
+                        })}
+                        className="px-2 py-0.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded border border-emerald-300 transition cursor-pointer"
+                      >
+                        Preview
+                      </button>
+                      <label className="px-2 py-0.5 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 transition cursor-pointer">
+                        Replace
+                        <input
+                          type="file"
+                          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,application/pdf"
+                          onChange={handleEditReportFileUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 cursor-pointer text-xs font-semibold text-slate-700">
+                      <UploadCloud className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Upload New Report (PDF)</span>
+                      <input
+                        type="file"
+                        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,application/pdf"
+                        onChange={handleEditReportFileUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const generated = generateCertifiedAssayPdf({
+                          farmerName: farmer?.name || 'Farmer',
+                          cropName: editCropName,
+                          soilType: editSoilType || 'Loamy',
+                          grade: editGrade,
+                          quantityQuintals: Number(editQuantity) || 100,
+                          pricePerQuintal: Number(editRate) || 2000
+                        });
+                        setEditReportDocument(generated);
+                        setEditReportFileName(`${(editCropName || 'Crop').replace(/[^a-zA-Z0-9]/g, '_')}_Assay.pdf`);
+                      }}
+                      className="px-2.5 py-1.5 bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-300 text-xs font-bold hover:bg-emerald-200 transition cursor-pointer"
+                    >
+                      ⚡ Auto-Generate
+                    </button>
+                  </div>
+                )}
+              </div>
+
               <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl">
                 <div className="flex justify-between items-center text-xs">
                   <span className="text-emerald-800 font-semibold">Updated Total Lot Value:</span>
@@ -1999,6 +2523,38 @@ export default function FarmerDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Report Viewer Modal */}
+      {selectedReportItem && (
+        <ReportViewerModal
+          item={selectedReportItem}
+          onClose={() => setSelectedReportItem(null)}
+        />
+      )}
+
+      {/* Live Dispatch Location & GPS Telemetry Tracker Modal */}
+      {dispatchModalData && (
+        <DispatchTrackingModal
+          delivery={dispatchModalData.delivery}
+          contract={dispatchModalData.contract}
+          onClose={() => setDispatchModalData(null)}
+          onRefresh={() => {
+            loadMyFarmData();
+          }}
+        />
+      )}
+
+      {/* Official Escrow Settlement Bill & Tax Invoice Modal */}
+      {viewingBillContract && (
+        <EscrowBillModal
+          contract={viewingBillContract}
+          onClose={() => setViewingBillContract(null)}
+          onTrackDispatch={(contract) => {
+            setViewingBillContract(null);
+            setDispatchModalData({ contract });
+          }}
+        />
       )}
     </div>
   );

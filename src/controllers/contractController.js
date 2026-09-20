@@ -2,6 +2,7 @@ import { ContractService } from '../services/contractService.js';
 import { ContractModel } from '../models/contractModel.js';
 import { FarmerModel } from '../models/farmerModel.js';
 import { ProcessorModel } from '../models/processorModel.js';
+import { DeliveryModel } from '../models/deliveryModel.js';
 
 export class ContractController {
   /**
@@ -175,6 +176,62 @@ export class ContractController {
         success: true,
         message: `Contract request cancelled by ${cancelled_by}`,
         data: updated
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/contracts/:id/pay-advance - Consumer pays 30% advance escrow
+   */
+  static async payAdvance(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { amount, payment_method = 'UPI', transaction_ref } = req.body;
+
+      const existing = ContractModel.findById(id);
+      if (!existing) {
+        return res.status(404).json({ success: false, error: `Contract with ID '${id}' not found` });
+      }
+
+      const updatedContract = ContractModel.payAdvance(id, {
+        amount,
+        paymentMethod: payment_method,
+        transactionRef: transaction_ref
+      });
+
+      // Auto-schedule and activate delivery tracking if not already created
+      let deliveries = DeliveryModel.findByContractId(id);
+      let delivery = deliveries[0];
+
+      if (!delivery) {
+        const farmer = FarmerModel.findById(existing.farmer_id);
+        const fLat = farmer?.location?.latitude || 30.7046;
+        const fLng = farmer?.location?.longitude || 75.8573;
+
+        delivery = DeliveryModel.create({
+          contract_id: id,
+          status: 'In Transit',
+          delivery_date: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
+          checkpoint: '30% Advance Escrow Deposited - Produce Dispatched from Farm Gate',
+          notes: `30% advance consideration (₹${updatedContract.advance_paid_amount.toLocaleString('en-IN')}) verified via ${payment_method}. Freight hauler dispatched from farm.`,
+          current_latitude: fLat,
+          current_longitude: fLng,
+          current_checkpoint: 'Farm Gate Loading Bay, Punjab',
+          driver_name: 'Jagtar Singh',
+          driver_phone: '+91-98140-11223',
+          vehicle_number: 'PB-10-AZ-9981',
+          speed_kmh: 48.0,
+          eta_minutes: 45
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: `30% Advance Escrow Payment of ₹${updatedContract.advance_paid_amount.toLocaleString('en-IN')} confirmed. Dispatch tracking activated.`,
+        data: updatedContract,
+        delivery
       });
     } catch (error) {
       next(error);

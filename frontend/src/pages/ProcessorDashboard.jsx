@@ -38,13 +38,20 @@ import {
   X,
   User,
   ExternalLink,
-  Plus
+  Plus,
+  FileCheck,
+  CreditCard,
+  Navigation
 } from 'lucide-react';
 import { api } from '../utils/api';
 import CompatibilityBadge from '../components/CompatibilityBadge';
 import GoogleMap from '../components/GoogleMap';
 import { useAuth } from '../context/AuthContext';
 import { matchProduceWithAi } from '../utils/aiCropSynonyms';
+import ReportViewerModal from '../components/ReportViewerModal';
+import AdvancePaymentModal from '../components/AdvancePaymentModal';
+import DispatchTrackingModal from '../components/DispatchTrackingModal';
+import EscrowBillModal from '../components/EscrowBillModal';
 
 export default function ProcessorDashboard() {
   const navigate = useNavigate();
@@ -116,6 +123,7 @@ export default function ProcessorDashboard() {
   const [procureNotes, setProcureNotes] = useState('');
   const [procureSubmitting, setProcureSubmitting] = useState(false);
   const [sentRequestIds, setSentRequestIds] = useState([]);
+  const [selectedReportItem, setSelectedReportItem] = useState(null);
 
   // Live Vernacular and AI Filtered Market Items with Match-to-Top Ranking
   const displayMarketItems = useMemo(() => {
@@ -193,6 +201,9 @@ export default function ProcessorDashboard() {
   const [loadingContracts, setLoadingContracts] = useState(false);
   const [contractFilter, setContractFilter] = useState('all');
   const [signingContractId, setSigningContractId] = useState(null);
+  const [advanceModalContract, setAdvanceModalContract] = useState(null);
+  const [dispatchModalData, setDispatchModalData] = useState(null);
+  const [viewingBillContract, setViewingBillContract] = useState(null);
 
   // Inbound Deliveries State
   const [deliveries, setDeliveries] = useState([]);
@@ -1044,10 +1055,25 @@ export default function ProcessorDashboard() {
                       </div>
                     )}
 
-                    {item.notes && (
-                      <p className="text-[11px] text-slate-500 italic bg-white p-2 rounded-lg border border-slate-100">
-                        "{item.notes}"
-                      </p>
+                    {/* Mandatory Soil & Quality Assay Report (PDF) */}
+                    {item.report_document ? (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-50/90 border border-emerald-200 rounded-xl text-xs">
+                        <div className="flex items-center gap-1.5 text-emerald-900 font-semibold truncate">
+                          <FileCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="truncate">{item.report_file_name || 'Soil_Assay_Report.pdf'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedReportItem(item)}
+                          className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 hover:bg-emerald-100 shrink-0 cursor-pointer shadow-xs flex items-center gap-1 transition"
+                        >
+                          <Eye className="w-3 h-3 text-emerald-600" /> View PDF
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-slate-400 italic bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        Assay report verification pending
+                      </div>
                     )}
                   </div>
 
@@ -1676,6 +1702,120 @@ export default function ProcessorDashboard() {
                       </div>
                     )}
 
+                    {/* 30% Advance Escrow Alert for Accepted Contracts */}
+                    {contract.status === 'Accepted' && contract.advance_payment_status !== 'paid' && (
+                      <div className="p-3.5 bg-gradient-to-r from-amber-50 to-emerald-50 border-2 border-amber-300 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-xs">
+                        <div className="flex items-start sm:items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 font-bold shadow-xs">
+                            30%
+                          </div>
+                          <div>
+                            <p className="font-extrabold text-slate-900">
+                              Farmer Accepted Your Request &bull; 30% Advance Escrow Required
+                            </p>
+                            <p className="text-[11px] text-slate-600">
+                              Deposit 30% advance (₹{Math.round((Number(contract.agreed_price) || 0) * 0.3).toLocaleString('en-IN')}) into secure escrow to dispatch produce.
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAdvanceModalContract(contract)}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                        >
+                          <CreditCard className="w-3.5 h-3.5" />
+                          <span>Pay 30% Advance Escrow &rarr;</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Escrow Paid Banner */}
+                    {(contract.advance_payment_status === 'paid' || ['Signed', 'In Transit'].includes(contract.status)) && (
+                      <div className="p-3 bg-emerald-50/80 border border-emerald-200 rounded-xl flex items-center justify-between gap-2.5 text-xs text-emerald-900">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0" />
+                          <span>
+                            <strong>30% Advance Escrow Deposited (₹{Number(contract.advance_paid_amount || Math.round((Number(contract.agreed_price) || 0) * 0.3)).toLocaleString('en-IN')}):</strong> Freight PB-10-AZ-9981 is dispatched and en route to silo.
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-extrabold px-2.5 py-1 rounded-full bg-emerald-200/80 text-emerald-900 shrink-0 uppercase tracking-wider">
+                          In Transit
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Escrow Settlement Bill Breakdown: Before Amount -> 30% Reduction -> After Amount */}
+                    {(() => {
+                      const grossTotal = Number(contract.agreed_price) || 0;
+                      const advanceReduction = Number(contract.advance_paid_amount) || Math.round(grossTotal * 0.3);
+                      const balanceAfterReduction = Math.max(0, grossTotal - advanceReduction);
+
+                      return (
+                        <div className="p-3.5 bg-gradient-to-br from-slate-50 to-slate-100/70 rounded-2xl border border-slate-200 space-y-2.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs font-extrabold text-slate-800 uppercase tracking-wider">
+                              <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Escrow Settlement Bill &amp; Reduction Ledger</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setViewingBillContract(contract)}
+                              className="px-2.5 py-1 bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-bold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                            >
+                              <FileText className="w-3 h-3" />
+                              <span>Make / View Bill &rarr;</span>
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                            {/* Before Reduction (Gross) */}
+                            <div className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                Gross Bill (Before Reduction)
+                              </span>
+                              <div className="font-extrabold text-slate-900 text-sm font-mono mt-0.5">
+                                ₹{grossTotal.toLocaleString('en-IN')}
+                              </div>
+                              <span className="text-[10px] text-slate-500 block">100% Contract Value</span>
+                            </div>
+
+                            {/* Reduction Amount (30% Escrow Advance) */}
+                            <div className="p-2.5 bg-amber-50/80 rounded-xl border border-amber-200 shadow-2xs">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider block">
+                                  30% Advance (Reduction)
+                                </span>
+                                <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
+                                  contract.advance_payment_status === 'paid' ? 'bg-emerald-600 text-white' : 'bg-amber-200 text-amber-900'
+                                }`}>
+                                  {contract.advance_payment_status === 'paid' ? 'DEDUCTED' : 'DUE'}
+                                </span>
+                              </div>
+                              <div className="font-extrabold text-amber-900 text-sm font-mono mt-0.5">
+                                - ₹{advanceReduction.toLocaleString('en-IN')}
+                              </div>
+                              <span className="text-[10px] text-amber-700 block">
+                                {contract.advance_payment_status === 'paid' ? 'Paid & Held in Escrow' : 'Awaiting 30% Deposit'}
+                              </span>
+                            </div>
+
+                            {/* After Reduction (Net Balance Due) */}
+                            <div className="p-2.5 bg-emerald-50/90 rounded-xl border border-emerald-300 shadow-2xs">
+                              <span className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider block">
+                                Net Due (After Reduction)
+                              </span>
+                              <div className="font-extrabold text-emerald-900 text-sm font-mono mt-0.5">
+                                ₹{balanceAfterReduction.toLocaleString('en-IN')}
+                              </div>
+                              <span className="text-[10px] text-emerald-700 font-medium block">
+                                70% Balance on Weighbridge Acceptance
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2 border-t border-slate-100">
                       <Link
                         to={`/contract/${contract.id}`}
@@ -1685,25 +1825,60 @@ export default function ProcessorDashboard() {
                         Open Digital Contract &amp; Logistics Tracker &rarr;
                       </Link>
 
-                      {(contract.status === 'Pending' || contract.status === 'Accepted') && (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* View Escrow Bill Button */}
                         <button
-                          onClick={() => handleSignContract(contract.id)}
-                          disabled={signingContractId === contract.id}
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          type="button"
+                          onClick={() => setViewingBillContract(contract)}
+                          className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl transition border border-slate-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
                         >
-                          {signingContractId === contract.id ? (
-                            <>
-                              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                              Verifying Signature...
-                            </>
-                          ) : (
-                            <>
-                              <Check className="w-3.5 h-3.5" />
-                              Digitally Counter-Sign Agreement
-                            </>
-                          )}
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>View Escrow Bill</span>
                         </button>
-                      )}
+
+                        {contract.status === 'Accepted' && contract.advance_payment_status !== 'paid' && (
+                          <button
+                            type="button"
+                            onClick={() => setAdvanceModalContract(contract)}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <CreditCard className="w-3.5 h-3.5" />
+                            <span>Pay 30% Advance Escrow</span>
+                          </button>
+                        )}
+
+                        {contract.status === 'Pending' && (
+                          <button
+                            onClick={() => handleSignContract(contract.id)}
+                            disabled={signingContractId === contract.id}
+                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            {signingContractId === contract.id ? (
+                              <>
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                Verifying Signature...
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-3.5 h-3.5" />
+                                Digitally Counter-Sign Agreement
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {/* Single Dispatch Location Tracking Button */}
+                        {(contract.advance_payment_status === 'paid' || ['Signed', 'In Transit', 'Fulfilled'].includes(contract.status)) && (
+                          <button
+                            type="button"
+                            onClick={() => setDispatchModalData({ contract })}
+                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Navigation className="w-3.5 h-3.5" />
+                            <span>Track Location of Dispatch</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -1851,13 +2026,23 @@ export default function ProcessorDashboard() {
 
                     {/* Quick Intake Actions */}
                     <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
-                      <Link
-                        to={`/contract/${del.contract_id}`}
-                        className="text-xs font-bold text-indigo-700 hover:text-indigo-800 hover:underline inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        Open Live GIS GPS Tracking View &rarr;
-                      </Link>
+                      <div className="flex items-center gap-3">
+                        <Link
+                          to={`/contract/${del.contract_id}`}
+                          className="text-xs font-bold text-indigo-700 hover:text-indigo-800 hover:underline inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          Open Contract Tracker &rarr;
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => setDispatchModalData({ delivery: del, contract: { id: del.contract_id, crop: del.crop } })}
+                          className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs rounded-lg border border-indigo-200 flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <Navigation className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Live Sat-Nav Map</span>
+                        </button>
+                      </div>
 
                       {del.status === 'Scheduled' && (
                         <button
@@ -2309,6 +2494,54 @@ export default function ProcessorDashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Report Viewer Modal for Consumers */}
+      {selectedReportItem && (
+        <ReportViewerModal
+          item={selectedReportItem}
+          onClose={() => setSelectedReportItem(null)}
+        />
+      )}
+
+      {/* 30% Advance Escrow Payment Modal */}
+      {advanceModalContract && (
+        <AdvancePaymentModal
+          contract={advanceModalContract}
+          onClose={() => setAdvanceModalContract(null)}
+          onSuccess={(updatedContract, delivery) => {
+            loadContracts();
+            loadDeliveries();
+          }}
+          onTrackDispatch={(delivery) => {
+            setDispatchModalData({ delivery, contract: advanceModalContract });
+          }}
+        />
+      )}
+
+      {/* Live Dispatch Location & GPS Telemetry Tracker Modal */}
+      {dispatchModalData && (
+        <DispatchTrackingModal
+          delivery={dispatchModalData.delivery}
+          contract={dispatchModalData.contract}
+          onClose={() => setDispatchModalData(null)}
+          onRefresh={() => {
+            loadContracts();
+            loadDeliveries();
+          }}
+        />
+      )}
+
+      {/* Official Escrow Settlement Bill & Tax Invoice Modal */}
+      {viewingBillContract && (
+        <EscrowBillModal
+          contract={viewingBillContract}
+          onClose={() => setViewingBillContract(null)}
+          onTrackDispatch={(contract) => {
+            setViewingBillContract(null);
+            setDispatchModalData({ contract });
+          }}
+        />
       )}
     </div>
   );

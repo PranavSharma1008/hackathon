@@ -21,4 +21,8 @@ router.patch('/:id/serve', ContractController.serveContract);
 // PATCH /api/contracts/:id/cancel - Cancel/Decline request
 router.patch('/:id/cancel', ContractController.cancelContract);
 
+// POST & PATCH /api/contracts/:id/pay-advance - Consumer pays 30% advance escrow
+router.post('/:id/pay-advance', ContractController.payAdvance);
+router.patch('/:id/pay-advance', ContractController.payAdvance);
+
 export default router;

@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS contracts (
     served_by TEXT, -- 'farmer' | 'processor'
     cancelled_by TEXT, -- 'farmer' | 'processor' | 'admin'
     cancel_reason TEXT,
+    advance_payment_status TEXT DEFAULT 'pending', -- 'pending', 'paid'
+    advance_paid_percentage REAL DEFAULT 0.0,
+    advance_paid_amount REAL DEFAULT 0.0,
+    payment_transaction_id TEXT,
     contract_text TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -86,6 +90,14 @@ CREATE TABLE IF NOT EXISTS deliveries (
     contract_id TEXT NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
     status TEXT NOT NULL CHECK(status IN ('Scheduled', 'In Transit', 'Delivered')) DEFAULT 'Scheduled',
     delivery_date TEXT NOT NULL,
+    current_latitude REAL,
+    current_longitude REAL,
+    current_checkpoint TEXT,
+    driver_name TEXT DEFAULT 'Jagtar Singh',
+    driver_phone TEXT DEFAULT '+91-98140-11223',
+    vehicle_number TEXT DEFAULT 'PB-10-AZ-9981',
+    speed_kmh REAL DEFAULT 48.0,
+    eta_minutes INTEGER DEFAULT 45,
     tracking_notes TEXT DEFAULT '[]', -- JSON array of milestone events
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -130,6 +142,8 @@ CREATE TABLE IF NOT EXISTS farmer_store_items (
     moisture_percentage REAL DEFAULT 11.5,
     local_names TEXT DEFAULT '',
     soil_type TEXT NOT NULL DEFAULT 'Loamy',
+    report_document TEXT, -- Data URL (base64) or content of mandatory quality/soil assay report
+    report_file_name TEXT, -- Filename e.g. "Soil_Health_Assay_Report.pdf"
     status TEXT NOT NULL CHECK(status IN ('available', 'reserved', 'sold')) DEFAULT 'available',
     notes TEXT,
     created_at TEXT NOT NULL,

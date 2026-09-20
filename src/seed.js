@@ -196,12 +196,15 @@ export function seedDatabase({ force = false } = {}) {
   );
 
   // 7. Seed Farmer Store Items (Stored produce with prices in ₹/Quintal)
+  const SAMPLE_ASSAY_PDF = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA2MTIgNzkyXQovQ29udGVudHMgNCAwIFIKL1Jlc291cmNlcyA8PAovRm9udCA8PAovRjEgNSAwIFIKPj4KPj4KPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCAxNzAKPj4Kc3RyZWFtCkJUCi9GMSAyNCBUZgoxMDAgNzAwIFRkCihPRkZJQ0lBTCBTT0lMICAmIENST1AgUVVBTElUWSBBU1NBWSBSRVBPUlQpIFRqCi9GMSAxMiBUZgowIC0zMCBUZAooQ2VydGlmaWVkIGJ5IFN0YXRlIEFwbWMgTWFuZGkgTGFiKSBUagowIC0yMCBUZAooU3RhdHVzOiBBcHByb3ZlZCAmIENvbXBsaWFudCB3aXRoIEZTQ0FJIC8gSVNPIFN0YW5kYXJkcykgVGoKRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8Ci9UeXBlIC9Gb250Ci9TdWJ0eXBlIC9UeXBlMQovQmFzZUZvbnQgL0hlbHZldGljYQo+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDE4IDAwMDAwIG4gCjAwMDAwMDAwNzcgMDAwMDAgbiAKMDAwMDAwMDEzMyAwMDAwMCBuIAowMDAwMDAwMjgxIDAwMDAwIG4gCjAwMDAwMDA1MDQgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA2Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgo1ODYKJSVFT0YK';
+
   db.exec('DELETE FROM farmer_store_items;');
   const stmtStore = db.prepare(`
     INSERT INTO farmer_store_items (
       id, farmer_id, crop_name, grade, quantity_quintals, price_per_quintal,
-      storage_type, harvest_date, moisture_percentage, local_names, soil_type, status, notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      storage_type, harvest_date, moisture_percentage, local_names, soil_type,
+      report_document, report_file_name, status, notes, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const initialStoreItems = [
@@ -217,6 +220,8 @@ export function seedDatabase({ force = false } = {}) {
       moisture_percentage: 11.2,
       local_names: 'gehun, kanak, sharbati, wheat',
       soil_type: 'Loamy',
+      report_document: SAMPLE_ASSAY_PDF,
+      report_file_name: 'APMC_Khanna_Wheat_Assay_Cert.pdf',
       status: 'available',
       notes: 'Clean golden grain, zero weed seeds, stored in temperature-controlled metal silo.'
     },
@@ -340,6 +345,8 @@ export function seedDatabase({ force = false } = {}) {
       item.moisture_percentage,
       item.local_names || '',
       item.soil_type || 'Loamy',
+      item.report_document || SAMPLE_ASSAY_PDF,
+      item.report_file_name || `${item.crop_name.replace(/[^a-zA-Z0-9]/g, '_')}_Assay_Certificate.pdf`,
       item.status,
       item.notes,
       now,

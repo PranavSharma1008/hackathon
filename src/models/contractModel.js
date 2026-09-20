@@ -17,6 +17,10 @@ export class ContractModel {
       served_by: row.served_by || null,
       cancelled_by: row.cancelled_by || null,
       cancel_reason: row.cancel_reason || null,
+      advance_payment_status: row.advance_payment_status || 'pending',
+      advance_paid_percentage: row.advance_paid_percentage || 0.0,
+      advance_paid_amount: row.advance_paid_amount || 0.0,
+      payment_transaction_id: row.payment_transaction_id || null,
       contract_text: row.contract_text,
       created_at: row.created_at,
       updated_at: row.updated_at
@@ -152,6 +156,34 @@ export class ContractModel {
       WHERE id = ?
     `);
     stmt.run(cancelledBy, reason, now, id);
+    return this.findById(id);
+  }
+
+  static payAdvance(id, { amount, paymentMethod = 'UPI', transactionRef } = {}) {
+    const db = getDb();
+    const contract = this.findById(id);
+    if (!contract) {
+      throw new Error(`Contract with ID '${id}' not found`);
+    }
+
+    const advanceAmount = amount !== undefined && Number(amount) > 0
+      ? Number(amount)
+      : Math.round(contract.agreed_price * 0.3);
+    const txnRef = transactionRef || `TXN-AGRI30-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const now = new Date().toISOString();
+
+    const stmt = db.prepare(`
+      UPDATE contracts 
+      SET status = 'Signed',
+          advance_payment_status = 'paid',
+          advance_paid_percentage = 30.0,
+          advance_paid_amount = ?,
+          payment_transaction_id = ?,
+          updated_at = ?
+      WHERE id = ?
+    `);
+
+    stmt.run(advanceAmount, txnRef, now, id);
     return this.findById(id);
   }
 

@@ -23,10 +23,15 @@ import {
   Gauge,
   Thermometer,
   Lock,
-  Stamp
+  Stamp,
+  CreditCard,
+  Navigation
 } from 'lucide-react';
 import { api } from '../utils/api';
 import SignaturePad from '../components/SignaturePad';
+import AdvancePaymentModal from '../components/AdvancePaymentModal';
+import DispatchTrackingModal from '../components/DispatchTrackingModal';
+import EscrowBillModal from '../components/EscrowBillModal';
 
 export default function ContractTrackingView() {
   const { id } = useParams();
@@ -38,6 +43,9 @@ export default function ContractTrackingView() {
   const [loading, setLoading] = useState(true);
   const [signing, setSigning] = useState(false);
   const [showSignModal, setShowSignModal] = useState(false);
+  const [showAdvanceModal, setShowAdvanceModal] = useState(false);
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
+  const [showBillModal, setShowBillModal] = useState(false);
   const [updatingDelivery, setUpdatingDelivery] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState(null);
@@ -167,9 +175,10 @@ export default function ContractTrackingView() {
     contract?.status === 'Accepted' || contract?.status === 'Signed' || contract?.status === 'Fulfilled';
   const isStep2Complete =
     isStep1Complete &&
-    (delivery?.status === 'In Transit' ||
-      delivery?.status === 'Delivered' ||
-      (delivery?.tracking_notes && delivery.tracking_notes.length >= 1));
+    (contract?.advance_payment_status === 'paid' ||
+      contract?.status === 'Signed' ||
+      delivery?.status === 'In Transit' ||
+      delivery?.status === 'Delivered');
   const isStep3Complete = delivery?.status === 'In Transit' || delivery?.status === 'Delivered';
   const isStep4Complete = delivery?.status === 'Delivered' || contract?.status === 'Fulfilled';
 
@@ -282,7 +291,7 @@ export default function ContractTrackingView() {
                   </div>
                 </div>
 
-                {/* Step 2: Harvest & QA Prep */}
+                {/* Step 2: 30% Advance Escrow */}
                 <div className={`p-4 rounded-xl border text-center transition-all ${
                   isStep2Complete
                     ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-2xs'
@@ -293,13 +302,13 @@ export default function ContractTrackingView() {
                   }`}>
                     {isStep2Complete ? <CheckCheck className="w-5 h-5" /> : '2'}
                   </div>
-                  <div className="font-bold text-xs uppercase">2. Harvest & QA Prep</div>
+                  <div className="font-bold text-xs uppercase">2. 30% Advance Escrow</div>
                   <div className="text-[11px] mt-0.5 opacity-80 font-medium">
-                    {isStep2Complete ? 'Moisture & Grade Validated' : 'Cultivation Lead Time'}
+                    {isStep2Complete ? `Paid (₹${Math.round((Number(contract.agreed_price) || 0) * 0.3).toLocaleString('en-IN')})` : 'Awaiting 30% Escrow'}
                   </div>
                 </div>
 
-                {/* Step 3: In Transit */}
+                {/* Step 3: In Transit & GPS Dispatch */}
                 <div className={`p-4 rounded-xl border text-center transition-all ${
                   isStep3Complete
                     ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-2xs'
@@ -310,9 +319,9 @@ export default function ContractTrackingView() {
                   }`}>
                     {isStep3Complete ? <CheckCheck className="w-5 h-5" /> : '3'}
                   </div>
-                  <div className="font-bold text-xs uppercase">3. In Transit</div>
+                  <div className="font-bold text-xs uppercase">3. GPS Freight Dispatch</div>
                   <div className="text-[11px] mt-0.5 opacity-80 font-medium">
-                    {isStep3Complete ? 'Highway Freight Active' : 'Pending Farm Gate Dispatch'}
+                    {isStep3Complete ? 'Highway Transit Active' : 'Pending Farm Gate Loading'}
                   </div>
                 </div>
 
@@ -342,6 +351,40 @@ export default function ContractTrackingView() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
+                {/* 30% Advance Escrow Deposit Button */}
+                {contract.status === 'Accepted' && contract.advance_payment_status !== 'paid' && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvanceModal(true)}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+                  >
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Pay 30% Advance Escrow (₹{Math.round((Number(contract.agreed_price) || 0) * 0.3).toLocaleString('en-IN')}) &rarr;</span>
+                  </button>
+                )}
+
+                {/* View Escrow Settlement Bill Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowBillModal(true)}
+                  className="px-4 py-2 rounded-lg bg-white hover:bg-slate-50 text-slate-800 text-xs font-bold border border-slate-300 shadow-2xs cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+                >
+                  <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>View Escrow Bill</span>
+                </button>
+
+                {/* Live Sat-Nav Dispatch Map Button */}
+                {(contract.advance_payment_status === 'paid' || delivery || ['Signed', 'In Transit', 'Fulfilled'].includes(contract.status)) && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDispatchModal(true)}
+                    className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95 transition-all"
+                  >
+                    <Navigation className="w-3.5 h-3.5" />
+                    <span>🚚 Open Live Sat-Nav Dispatch Tracker</span>
+                  </button>
+                )}
+
                 {contract.status === 'Pending' && (
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
@@ -377,7 +420,7 @@ export default function ContractTrackingView() {
                     onClick={() =>
                       handleAdvanceMilestone(
                         'In Transit',
-                        'Dispatched from farm gate via Heavy Freight Carrier PB-10-CZ-4421',
+                        'Dispatched from farm gate via Heavy Freight Carrier PB-10-AZ-9981',
                         'Pre-dispatch Mandi inspection approved: Sharbati Wheat, moisture 10.8%, purity 99.1% verified.'
                       )
                     }
@@ -396,21 +439,21 @@ export default function ContractTrackingView() {
                       handleAdvanceMilestone(
                         'Delivered',
                         'Weighbridge inspection complete. Official weighment slip generated and Mandi QA Lab verified.',
-                        'Produce purity 99.2% confirmed. Final 80% escrow settlement disbursed via DBT to farmer.'
+                        'Produce purity 99.2% confirmed. Final 70% escrow settlement disbursed directly to farmer.'
                       )
                     }
                     disabled={updatingDelivery}
                     className="px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow-xs cursor-pointer disabled:opacity-50 flex items-center gap-1.5 active:scale-95 transition-all"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
-                    <span>{updatingDelivery ? 'Updating...' : 'Confirm Weighbridge Receipt & Disburse Escrow'}</span>
+                    <span>{updatingDelivery ? 'Updating...' : 'Confirm Weighbridge Receipt & Disburse 70% Escrow'}</span>
                   </button>
                 )}
 
                 {isStep4Complete && (
                   <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800 bg-emerald-100/80 px-3 py-1.5 rounded-lg border border-emerald-300">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span>Lifecycle Completed & Escrow Released</span>
+                    <span>Lifecycle Completed &amp; Escrow Released</span>
                   </div>
                 )}
               </div>
@@ -504,7 +547,7 @@ export default function ContractTrackingView() {
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-1">
               <div className="text-xs font-bold text-slate-400 uppercase flex items-center gap-1.5">
                 <FileText className="w-3.5 h-3.5 text-blue-600" />
-                Agreed Value & Volume
+                Agreed Value &amp; Volume
               </div>
               <div className="text-base font-extrabold text-emerald-700">
                 ₹{Number(contract.agreed_price).toLocaleString('en-IN')} INR
@@ -517,6 +560,80 @@ export default function ContractTrackingView() {
               </div>
             </div>
           </div>
+
+          {/* Escrow Settlement Bill Breakdown: Before Amount -> 30% Reduction -> After Amount */}
+          {(() => {
+            const grossTotal = Number(contract.agreed_price) || 0;
+            const advanceReduction = Number(contract.advance_paid_amount) || Math.round(grossTotal * 0.3);
+            const balanceAfterReduction = Math.max(0, grossTotal - advanceReduction);
+
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-emerald-600" />
+                    <h3 className="font-extrabold text-sm text-slate-800 uppercase tracking-wider">
+                      Official Escrow Settlement Bill &amp; Deduction Schedule
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowBillModal(true)}
+                    className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>View / Print Legal Tax Bill &rarr;</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Before Amount */}
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                      Before Reduction (Gross Bill)
+                    </span>
+                    <div className="text-xl font-extrabold text-slate-900 font-mono mt-0.5">
+                      ₹{grossTotal.toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5">100% total agreed contract value</p>
+                  </div>
+
+                  {/* 30% Advance Escrow Reduction */}
+                  <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase font-bold text-amber-800 tracking-wider block">
+                        30% Advance (Reduction)
+                      </span>
+                      <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
+                        contract.advance_payment_status === 'paid' ? 'bg-emerald-600 text-white' : 'bg-amber-200 text-amber-900'
+                      }`}>
+                        {contract.advance_payment_status === 'paid' ? 'DEDUCTED' : 'PENDING'}
+                      </span>
+                    </div>
+                    <div className="text-xl font-extrabold text-amber-900 font-mono mt-0.5">
+                      - ₹{advanceReduction.toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-[11px] text-amber-700 mt-0.5 font-mono">
+                      {contract.advance_payment_status === 'paid' ? 'Paid & Held in Trust Escrow' : 'Deposit required to dispatch'}
+                    </p>
+                  </div>
+
+                  {/* After Amount (70% Net Due) */}
+                  <div className="p-3.5 rounded-xl bg-emerald-50/90 border border-emerald-300 shadow-2xs">
+                    <span className="text-[10px] uppercase font-bold text-emerald-800 tracking-wider block">
+                      After Reduction (Net Balance Due)
+                    </span>
+                    <div className="text-xl font-extrabold text-emerald-900 font-mono mt-0.5">
+                      ₹{balanceAfterReduction.toLocaleString('en-IN')}
+                    </div>
+                    <p className="text-[11px] text-emerald-700 font-medium mt-0.5">
+                      70% final disbursement upon weighbridge inspection
+                    </p>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Signature Modal */}
           {showSignModal && (
@@ -609,6 +726,45 @@ export default function ContractTrackingView() {
             </div>
           </div>
         </>
+      )}
+
+      {/* 30% Advance Escrow Payment Modal */}
+      {showAdvanceModal && contract && (
+        <AdvancePaymentModal
+          contract={contract}
+          onClose={() => setShowAdvanceModal(false)}
+          onSuccess={(updatedContract, del) => {
+            setContract(updatedContract);
+            if (del) setDelivery(del);
+            loadContractDetails(contract.id);
+          }}
+          onTrackDispatch={(del) => {
+            if (del) setDelivery(del);
+            setShowDispatchModal(true);
+          }}
+        />
+      )}
+
+      {/* Live Dispatch Location & GPS Telemetry Tracker Modal */}
+      {showDispatchModal && (
+        <DispatchTrackingModal
+          delivery={delivery}
+          contract={contract}
+          onClose={() => setShowDispatchModal(false)}
+          onRefresh={(updatedDelivery) => {
+            if (updatedDelivery) setDelivery(updatedDelivery);
+            loadContractDetails(contract.id);
+          }}
+        />
+      )}
+
+      {/* Official Escrow Settlement Bill & Tax Invoice Modal */}
+      {showBillModal && contract && (
+        <EscrowBillModal
+          contract={contract}
+          onClose={() => setShowBillModal(false)}
+          onTrackDispatch={() => setShowDispatchModal(true)}
+        />
       )}
     </div>
   );

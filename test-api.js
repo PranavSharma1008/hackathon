@@ -254,8 +254,20 @@ async function runTests() {
     assert(approveRes.body.application.status === 'approved', 'Application status updated to approved');
     assert(approveRes.body.processor !== null, 'Processor entity registered in system');
 
-    // 16. Test Farmer Produce Store (Adding material with ₹/Quintal price and marketplace lookup)
-    console.log('\nTest 16: Farmer Produce Store & Inventory (Add material with ₹/Quintal rate)');
+    // 16. Test Farmer Produce Store (Adding material with ₹/Quintal price, mandatory report PDF, and marketplace lookup)
+    console.log('\nTest 16: Farmer Produce Store & Inventory (Mandatory PDF Report & ₹/Quintal rate)');
+    
+    // First, verify that adding without mandatory report file is rejected (400 Bad Request)
+    const missingReportRes = await request('POST', '/api/farmers/farm_rajesh_01/store', {
+      crop_name: 'Premium Sharbati Wheat Batch #9',
+      grade: 'Grade A',
+      quantity_quintals: 500,
+      price_per_quintal: 2500
+    });
+    assert(missingReportRes.status === 400, 'Rejects product listing without mandatory report file with 400 Bad Request');
+    assert(missingReportRes.body.error.includes('Mandatory Soil & Crop Quality Assay Report'), 'Explains mandatory report file required');
+
+    const samplePdfData = 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2Jq...';
     const addStoreRes = await request('POST', '/api/farmers/farm_rajesh_01/store', {
       crop_name: 'Premium Sharbati Wheat Batch #9',
       grade: 'Grade A',
@@ -265,11 +277,14 @@ async function runTests() {
       harvest_date: '2026-09-01',
       moisture_percentage: 11.0,
       soil_type: 'Alluvial',
+      report_document: samplePdfData,
+      report_file_name: 'Khanna_APMC_Wheat_Assay_Cert.pdf',
       notes: 'Super clean harvest from organic plot.'
     });
     assert(addStoreRes.status === 201, 'Item added to farmer store with 201 Created');
     assert(addStoreRes.body.data.price_per_quintal === 2500, 'Price stored as ₹2,500/Quintal');
     assert(addStoreRes.body.data.soil_type === 'Alluvial', 'Cultivated soil type persisted in store item');
+    assert(addStoreRes.body.data.report_file_name === 'Khanna_APMC_Wheat_Assay_Cert.pdf', 'Mandatory report PDF file persisted');
     assert(addStoreRes.body.data.total_value_inr === 1250000, 'Total value calculated (500 Qtl * ₹2,500 = ₹12,50,000)');
 
     // 17. Test Duplicate Email Prevention (High Security Check)
@@ -316,7 +331,9 @@ async function runTests() {
       quantity_quintals: 300,
       price_per_quintal: 3800,
       storage_type: 'Farm Silo',
-      harvest_date: '2026-09-10'
+      harvest_date: '2026-09-10',
+      report_document: 'data:application/pdf;base64,JVBERi0xLjQKMSAwIG9iago...',
+      report_file_name: 'Basmati_1121_Soil_Assay.pdf'
     });
     assert(farmerStoreAdd.status === 201, 'Farmer added inventory to own store');
     
@@ -413,8 +430,42 @@ async function runTests() {
     assert(grantRoleRes.status === 200, 'Admin role update returns 200 OK');
     assert(grantRoleRes.body.user.role === 'farmer', 'User upgraded from visitor to farmer');
 
+    // 25. Test 30% Advance Escrow Payment & Live Dispatch Location Tracking
+    console.log('\nTest 25: 30% Advance Escrow Payment & Live Dispatch Location Tracking');
+    const contractForAdvance = await request('POST', '/api/contracts/generate', {
+      processor_id: testProcId,
+      farmer_id: 'farm_rajesh_01',
+      agreed_price: 300000, // ₹3,00,000 total
+      quantity: 120,
+      crop: 'Sharbati Wheat'
+    });
+    assert(contractForAdvance.status === 201, 'Contract generated for advance payment test');
+    const advanceCtrId = contractForAdvance.body.data.id;
+
+    // Both users agreed: farmer serves/accepts
+    await request('PATCH', `/api/contracts/${advanceCtrId}/serve`, { served_by: 'farmer' });
+
+    // Consumer pays 30% advance escrow (₹90,000)
+    const payAdvRes = await request('POST', `/api/contracts/${advanceCtrId}/pay-advance`, {
+      amount: 90000,
+      payment_method: 'UPI',
+      transaction_ref: 'TXN-UPI-MOCK-30PCT'
+    });
+    assert(payAdvRes.status === 200, '30% Advance payment returns 200 OK');
+    assert(payAdvRes.body.data.advance_payment_status === 'paid', 'Contract advance payment status is paid');
+    assert(payAdvRes.body.data.advance_paid_percentage === 30, 'Advance paid percentage is 30%');
+    assert(payAdvRes.body.data.advance_paid_amount === 90000, 'Advance paid amount recorded as ₹90,000');
+    assert(payAdvRes.body.delivery !== null, 'Delivery and dispatch tracking auto-activated');
+    const advanceDelId = payAdvRes.body.delivery.id;
+
+    // Advance shipment to next GPS checkpoint
+    const advanceStepRes = await request('POST', `/api/deliveries/${advanceDelId}/advance-step`);
+    assert(advanceStepRes.status === 200, 'Shipment location advancement returns 200 OK');
+    assert(advanceStepRes.body.data.status === 'In Transit', 'Shipment status is In Transit');
+    assert(advanceStepRes.body.data.current_checkpoint.includes('NH-44'), 'Checkpoint updated to highway transit');
+
     console.log('\n======================================================');
-    console.log('🎉 ALL TESTS PASSED SUCCESSFULLY! (24/24 test groups)');
+    console.log('🎉 ALL TESTS PASSED SUCCESSFULLY! (25/25 test groups)');
     console.log('======================================================\n');
   } catch (err) {
     console.error('Test execution error:', err);

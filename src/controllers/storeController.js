@@ -69,6 +69,17 @@ export class StoreController {
         });
       }
 
+      // Mandatory PDF or document file of Soil & Crop Quality Assay Report
+      const reportDocument = req.body.report_document || req.body.report_file || req.body.report_data || null;
+      const reportFileName = req.body.report_file_name || req.body.report_name || null;
+
+      if (!reportDocument || !String(reportDocument).trim()) {
+        return res.status(400).json({
+          success: false,
+          error: 'Mandatory Soil & Crop Quality Assay Report (PDF or document file) is required to list this commodity in the store.'
+        });
+      }
+
       const farmer = FarmerModel.findById(id);
       if (!farmer) {
         return res.status(404).json({
@@ -88,6 +99,8 @@ export class StoreController {
         moisture_percentage: moisture_percentage ? Number(moisture_percentage) : 11.5,
         local_names: req.body.local_names || '',
         soil_type: soil_type || farmer.soil_type || 'Loamy',
+        report_document: reportDocument,
+        report_file_name: reportFileName || 'Soil_Quality_Assay_Report.pdf',
         status: 'available',
         notes
       });

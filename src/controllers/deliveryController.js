@@ -120,8 +120,14 @@ export class DeliveryController {
    */
   static async getDeliveries(req, res, next) {
     try {
-      const { status } = req.query;
-      const deliveries = DeliveryModel.findAll({ status });
+      const { status, contract_id } = req.query;
+
+      let deliveries;
+      if (contract_id) {
+        deliveries = DeliveryModel.findByContractId(contract_id);
+      } else {
+        deliveries = DeliveryModel.findAll({ status });
+      }
 
       return res.status(200).json({
         success: true,
@@ -148,6 +154,61 @@ export class DeliveryController {
       return res.status(200).json({
         success: true,
         data: delivery
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PUT /api/deliveries/:id/location - Update GPS telemetry
+   */
+  static async updateLocation(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { latitude, longitude, checkpoint, speed_kmh, eta_minutes, notes } = req.body;
+      const delivery = DeliveryModel.findById(id);
+      if (!delivery) {
+        return res.status(404).json({ success: false, error: `Delivery '${id}' not found` });
+      }
+
+      const updated = DeliveryModel.updateLocation(id, {
+        latitude,
+        longitude,
+        checkpoint,
+        speedKmh: speed_kmh,
+        etaMinutes: eta_minutes,
+        notes
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'GPS telemetry and dispatch location updated',
+        data: updated
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/deliveries/:id/advance-step - Advance dispatch truck to next checkpoint along route
+   */
+  static async advanceStep(req, res, next) {
+    try {
+      const { id } = req.params;
+      const delivery = DeliveryModel.findById(id);
+      if (!delivery) {
+        return res.status(404).json({ success: false, error: `Delivery '${id}' not found` });
+      }
+
+      const updated = DeliveryModel.advanceLocationStep(id);
+
+      return res.status(200).json({
+        success: true,
+        message: `Shipment advanced to checkpoint: ${updated.current_checkpoint}`,
+        contract_fulfilled: updated.status === 'Delivered',
+        data: updated
       });
     } catch (error) {
       next(error);
